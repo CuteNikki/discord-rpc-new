@@ -22,7 +22,7 @@ npm install discord-rpc-new
 ## 🛠️ Quick Start
 
 ```typescript
-import { Client, ActivityPayload, ActivityType } from 'discord-rpc-new';
+import { Client, ActivityPayload, ActivityType, PresenceBuilder } from 'discord-rpc-new';
 
 // Environment variable for Discord Client ID
 const DISCORD_CLIENT_ID = process.env.DISCORD_CLIENT_ID;
@@ -46,12 +46,35 @@ const response = await client.login({ clientId: DISCORD_CLIENT_ID });
 console.log('Logged in as:', response.user.username);
 
 // Example activity payload
-const activity: ActivityPayload = {
-  type: ActivityType.Playing,
-  state: 'Testing IPC',
-  details: 'IPC Test',
-};
+const activity = new PresenceBuilder()
+  .setType(ActivityType.Playing)
+  .setDetails('Testing new PresenceBuilder')
+  .setState('In a flow state')
+  .setLargeImage('some-image', 'Hover Text!')
+  .setStartTimestamp(Date.now())
+  .build();
 client.setActivity(activity);
+```
+
+Advanced: Full OAuth2 Flow:
+
+```ts
+// 1. Get Authorization Code
+const { code } = await client.authorize({
+  clientId: DISCORD_CLIENT_ID,
+  scopes: ['identify', 'rpc'],
+});
+
+// 2. Exchange for Access Token
+const { access_token } = await client.exchangeCode({
+  clientId: DISCORD_CLIENT_ID,
+  clientSecret: DISCORD_CLIENT_SECRET,
+  code,
+});
+
+// 3. Authenticate Session
+const auth = await client.authenticate(access_token);
+console.log(`Authenticated application: ${auth.application.name}`);
 ```
 
 ---

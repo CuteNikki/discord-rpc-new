@@ -1,12 +1,14 @@
+// Libraries
+import { EventEmitter } from 'node:events';
+// Internal
 import { SocketConnection } from './connection';
-import type { ActivityPayload } from './types/activities';
-import type { ReadyResponse } from './types/client';
-import { OpCode } from './types/opcodes';
+// Types
+import { Command, OpCode, type ActivityPayload, type AuthenticateResponse, type AuthorizeResponse, type ReadyResponse } from './types';
 
 /**
  * Main RPC Client for managing Discord Rich Presence.
  */
-export class Client {
+export class Client extends EventEmitter {
   /**
    * Underlying Discord IPC connection
    */
@@ -18,36 +20,83 @@ export class Client {
   private isReady = false;
 
   /**
+   * The client ID of the Discord application
+   */
+  private clientId?: string;
+
+  /**
+   * Initializes a new RPC Client instance.
+   */
+  constructor() {
+    super();
+
+    // Centralized data handler
+    this.connection.onData((op: OpCode, data: any) => {
+      this.handleIncoming(op, data);
+    });
+  }
+
+  /**
+   * Handles incoming data from Discord.
+   * @param op OpCode of the incoming message
+   * @param data Payload data
+   * @returns void
+   */
+  private handleIncoming(op: OpCode, data: any) {
+    // 1. Handle Protocol-level events
+    if (op === OpCode.CLOSE) {
+      this.emit('disconnected', data);
+      return;
+    }
+
+    if (op === OpCode.PING) {
+      this.emit('ping', data);
+      return;
+    }
+
+    // 2. Handle Frame-level events
+    if (op === OpCode.FRAME) {
+      // Emit the specific command/event type
+      if (data.evt === 'READY') {
+        this.isReady = true;
+        this.emit('ready', data.data);
+      }
+
+      if (data.evt === 'ERROR') {
+        this.emit('error', new Error(data.data.message));
+      }
+
+      // Emit everything else as general 'message' or by command name
+      this.emit(data.cmd, data);
+    }
+  }
+
+  /**
    * Logs in to Discord and establishes the IPC connection.
    * @returns Promise that resolves when login is successful
    */
-  async login({ clientId }: { clientId: string }): Promise<ReadyResponse> {
+  async login({
+    clientId,
+    clientSecret,
+    scopes,
+    accessToken,
+  }: {
+    clientId: string;
+    clientSecret?: string;
+    scopes?: string[];
+    accessToken?: string;
+  }): Promise<ReadyResponse> {
+    this.clientId = clientId;
     await this.connection.connect();
 
     return new Promise((resolve, reject) => {
-      // 1. Set up the listener for the READY event
-      this.connection.onData((op, data) => {
-        if (op === OpCode.FRAME && data.evt === 'READY') {
-          this.isReady = true;
-          resolve(data.data); // Return the user data to the caller
-        }
-
-        // Optional: handle errors/close during login
-        if (op === OpCode.CLOSE) {
-          reject(new Error('Connection closed by Discord during handshake'));
-        }
+      this.once('ready', (data) => {
+        // Start heartbeat
+        setInterval(() => this.ping(), 30_000);
+        resolve(data);
       });
 
-      // 2. Send the Handshake
-      this.connection.send(OpCode.HANDSHAKE, {
-        v: 1,
-        client_id: clientId,
-      });
-
-      // 3. Send a heartbeat every 30 seconds to keep the connection alive
-      setInterval(() => {
-        this.connection.send(OpCode.PING, { nonce: crypto.randomUUID() });
-      }, 30_000);
+      this.connection.send(OpCode.HANDSHAKE, { v: 1, client_id: clientId });
     });
   }
 
@@ -56,23 +105,113 @@ export class Client {
    * @returns Promise that resolves when the client is destroyed
    */
   async destroy() {
-    // Clear the activity before closing
-    try {
-      this.connection.send(OpCode.FRAME, {
-        cmd: 'SET_ACTIVITY',
-        args: {
-          pid: process.pid,
-          activity: null,
-        },
-        nonce: crypto.randomUUID(),
-      });
+    // Clear activity before destroying
+    this.connection.send(OpCode.FRAME, { cmd: Command.SET_ACTIVITY, args: { pid: process.pid, activity: null }, nonce: crypto.randomUUID() });
+    // Wait a moment to ensure the message is sent before closing
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    // Destroy the underlying connection
+    this.connection.destroy();
+  }
 
-      // Wait a moment to ensure the message is sent before closing
-      await new Promise((resolve) => setTimeout(resolve, 100));
-      this.connection.destroy();
-    } catch (error) {
-      throw new Error('Failed to destroy RPC client: ' + (error as Error).message);
+  /**
+   * Sends a ping to Discord to keep the connection alive.
+   */
+  ping() {
+    this.connection.send(OpCode.PING, { nonce: crypto.randomUUID() });
+  }
+
+  /**
+   * Sends a command request to Discord and waits for the response.
+   * @param cmd Command to send
+   * @param args Arguments for the command
+   * @returns Promise that resolves with the command response
+   */
+  private async request(cmd: Command, args: object): Promise<any> {
+    const nonce = crypto.randomUUID();
+
+    return new Promise((resolve, reject) => {
+      // Create a specific handler for this command + nonce
+      const handler = (data: any) => {
+        if (data.nonce === nonce) {
+          // Clean up: stop listening for this command once we find our nonce
+          this.removeListener(cmd, handler);
+
+          if (data.evt === 'ERROR') {
+            reject(new Error(data.data.message));
+          } else {
+            resolve(data.data);
+          }
+        }
+      };
+
+      // Listen for the command event emitted by handleIncoming
+      this.on(cmd, handler);
+
+      // Send the frame to Discord
+      this.connection.send(OpCode.FRAME, { cmd, args, nonce });
+    });
+  }
+
+  /**
+   * Authorizes the application and retrieves an authorization code.
+   * @param param0 Object containing clientId and scopes
+   * @returns Promise that resolves with the authorization code
+   */
+  async authorize({ clientId, scopes }: { clientId: string; scopes: string[] }): Promise<AuthorizeResponse> {
+    const data = await this.request(Command.AUTHORIZE, {
+      client_id: clientId,
+      scopes,
+    });
+    return data;
+  }
+
+  /**
+   * Authenticates the user with an access token.
+   * @param accessToken Access token to authenticate with
+   * @returns Promise that resolves with the authentication response
+   */
+  async authenticate(accessToken: string): Promise<AuthenticateResponse> {
+    return this.request(Command.AUTHENTICATE, {
+      access_token: accessToken,
+    });
+  }
+
+  /**
+   * Exchanges an authorization code for an access token.
+   * @param param0 Object containing clientId, clientSecret, code, and redirectUri
+   * @returns Promise that resolves with the access token response
+   */
+  async exchangeCode({
+    clientId,
+    clientSecret,
+    code,
+    redirectUri,
+  }: {
+    clientId: string;
+    clientSecret: string;
+    code: string;
+    redirectUri: string;
+  }): Promise<{ access_token: string; scope: string; token_type: string }> {
+    const response = await fetch('https://discord.com/api/oauth2/token', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams({
+        client_id: clientId,
+        client_secret: clientSecret,
+        grant_type: 'authorization_code',
+        redirect_uri: redirectUri,
+        code: code,
+      }),
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(`Failed to exchange code: ${JSON.stringify(error)}`);
     }
+
+    return (await response.json()) as { access_token: string; scope: string; token_type: string };
   }
 
   /**
@@ -87,7 +226,7 @@ export class Client {
     }
 
     this.connection.send(OpCode.FRAME, {
-      cmd: 'SET_ACTIVITY',
+      cmd: Command.SET_ACTIVITY,
       args: {
         pid: process.pid,
         activity,
