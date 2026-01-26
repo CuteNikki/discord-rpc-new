@@ -21,18 +21,7 @@ jobs:
       - name: Build Project
         run: bun run build
 
-      - name: Setup Node (for publishing only)
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          registry-url: 'https://registry.npmjs.org'
-
-      - name: Verify npm Authentication
-        run: npm whoami
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
       - name: Publish to npm
-        run: npm publish --access public
+        run: bun publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
