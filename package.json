@@ -1,6 +1,6 @@
 {
   "name": "discord-rpc-new",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "A lightweight, typed Discord RPC client",
   "keywords": [
     "discord",
@@ -8,6 +8,14 @@
     "rich presence",
     "remote procedural call"
   ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/CuteNikki/discord-rpc-new.git"
+  },
+  "bugs": {
+    "url": "https://github.com/CuteNikki/discord-rpc-new/issues"
+  },
+  "homepage": "https://github.com/CuteNikki/discord-rpc-new#readme",
   "exports": {
     ".": {
       "bun": "./src/index.ts",
