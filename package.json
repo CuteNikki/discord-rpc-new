@@ -1,6 +1,6 @@
 {
   "name": "discord-rpc-new",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "A lightweight, typed Discord RPC client",
   "keywords": [
     "discord",
