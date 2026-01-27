@@ -140,6 +140,37 @@ export class PresenceBuilder {
   }
 
   /**
+   * Sets buttons for the activity.
+   * @param buttons Array of button objects with label and url
+   * @returns The PresenceBuilder instance
+   */
+  setButtons(buttons: { label: string; url: string }[]): this {
+    if (buttons.length > 2) {
+      throw new Error('A maximum of 2 buttons are allowed.');
+    }
+
+    this.payload.buttons = buttons;
+    return this;
+  }
+
+  /**
+   * Adds a single button to the activity.
+   * @param label Button label
+   * @param url Button URL
+   * @returns The PresenceBuilder instance
+   */
+  addButton(label: string, url: string): this {
+    if (!this.payload.buttons) {
+      this.payload.buttons = [];
+    }
+    if (this.payload.buttons.length >= 2) {
+      throw new Error('A maximum of 2 buttons are allowed.');
+    }
+    this.payload.buttons.push({ label, url });
+    return this;
+  }
+
+  /**
    * Builds and returns the final activity payload.
    * @returns The constructed ActivityPayload object
    */

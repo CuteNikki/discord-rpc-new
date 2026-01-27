@@ -49,6 +49,14 @@ export enum ActivityType {
 }
 
 /**
+ * Button structure for an activity.
+ */
+export interface Button {
+  label: string;
+  url: string;
+}
+
+/**
  * Payload structure for an activity.
  */
 export interface ActivityPayload {
@@ -60,4 +68,25 @@ export interface ActivityPayload {
   party?: Party;
   secrets?: Secrets;
   instance?: boolean;
+  buttons?: Button[];
+}
+
+/**
+ * Enum for lobby types.
+ */
+export enum LobbyType {
+  PRIVATE = 1,
+  PUBLIC = 2,
+}
+
+/**
+ * Enum for relationship types.
+ */
+export enum RelationshipType {
+  NONE = 0,
+  FRIEND = 1,
+  BLOCKED = 2,
+  PENDING_INCOMING = 3,
+  PENDING_OUTGOING = 4,
+  IMPLICIT = 5,
 }

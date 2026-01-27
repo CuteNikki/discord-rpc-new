@@ -1,3 +1,6 @@
+/**
+ * Commands sent to Discord IPC
+ */
 export enum Command {
   ACCEPT_ACTIVITY_INVITE = 'ACCEPT_ACTIVITY_INVITE',
   ACTIVITY_INVITE_USER = 'ACTIVITY_INVITE_USER',

@@ -3,7 +3,7 @@ import { EventEmitter } from 'node:events';
 // Internal
 import { SocketConnection } from './connection';
 // Types
-import { Command, OpCode, type ActivityPayload, type AuthenticateResponse, type AuthorizeResponse, type ReadyResponse } from './types';
+import { Command, Event, LobbyType, OpCode, type ActivityPayload, type AuthenticateResponse, type AuthorizeResponse, type ReadyResponse } from './types';
 
 /**
  * Main RPC Client for managing Discord Rich Presence.
@@ -57,13 +57,13 @@ export class Client extends EventEmitter {
     // 2. Handle Frame-level events
     if (op === OpCode.FRAME) {
       // Emit the specific command/event type
-      if (data.evt === 'READY') {
+      if (data.evt === Event.READY) {
         this.isReady = true;
-        this.emit('ready', data.data);
+        this.emit(Event.READY, data.data);
       }
 
-      if (data.evt === 'ERROR') {
-        this.emit('error', new Error(data.data.message));
+      if (data.evt === Event.ERROR) {
+        this.emit(Event.ERROR, new Error(data.data.message));
       }
 
       // Emit everything else as general 'message' or by command name
@@ -89,8 +89,8 @@ export class Client extends EventEmitter {
     this.clientId = clientId;
     await this.connection.connect();
 
-    return new Promise((resolve, reject) => {
-      this.once('ready', (data) => {
+    return new Promise((resolve) => {
+      this.once(Event.READY, (data) => {
         // Start heartbeat
         setInterval(() => this.ping(), 30_000);
         resolve(data);
@@ -106,7 +106,7 @@ export class Client extends EventEmitter {
    */
   async destroy() {
     // Clear activity before destroying
-    this.connection.send(OpCode.FRAME, { cmd: Command.SET_ACTIVITY, args: { pid: process.pid, activity: null }, nonce: crypto.randomUUID() });
+    this.clearActivity();
     // Wait a moment to ensure the message is sent before closing
     await new Promise((resolve) => setTimeout(resolve, 100));
     // Destroy the underlying connection
@@ -124,9 +124,10 @@ export class Client extends EventEmitter {
    * Sends a command request to Discord and waits for the response.
    * @param cmd Command to send
    * @param args Arguments for the command
+   * @param evt Optional event name to listen for
    * @returns Promise that resolves with the command response
    */
-  private async request(cmd: Command, args: object): Promise<any> {
+  async request(cmd: Command, args?: object, evt?: Event): Promise<any> {
     const nonce = crypto.randomUUID();
 
     return new Promise((resolve, reject) => {
@@ -148,7 +149,7 @@ export class Client extends EventEmitter {
       this.on(cmd, handler);
 
       // Send the frame to Discord
-      this.connection.send(OpCode.FRAME, { cmd, args, nonce });
+      this.connection.send(OpCode.FRAME, { cmd, args, evt, nonce });
     });
   }
 
@@ -157,10 +158,11 @@ export class Client extends EventEmitter {
    * @param param0 Object containing clientId and scopes
    * @returns Promise that resolves with the authorization code
    */
-  async authorize({ clientId, scopes }: { clientId: string; scopes: string[] }): Promise<AuthorizeResponse> {
+  async authorize({ clientId, scopes, args }: { clientId: string; scopes: string[]; args?: object }): Promise<AuthorizeResponse> {
     const data = await this.request(Command.AUTHORIZE, {
       client_id: clientId,
       scopes,
+      ...args,
     });
     return data;
   }
@@ -215,6 +217,22 @@ export class Client extends EventEmitter {
   }
 
   /**
+   * Subscribes to a specific event from Discord.
+   * @param event Event name to subscribe to
+   * @param args Optional arguments for the subscription
+   * @returns Promise that resolves with an unsubscribe function
+   */
+  async subscribe(event: Event, args: object = {}): Promise<{ unsubscribe: () => Promise<void> }> {
+    await this.request(Command.SUBSCRIBE, args, event);
+
+    return {
+      unsubscribe: async () => {
+        await this.request(Command.UNSUBSCRIBE, args, event);
+      },
+    };
+  }
+
+  /**
    * Sets the Rich Presence activity for the user.
    * @param activity Activity payload to set
    * @returns void
@@ -225,14 +243,20 @@ export class Client extends EventEmitter {
       return;
     }
 
-    this.connection.send(OpCode.FRAME, {
-      cmd: Command.SET_ACTIVITY,
-      args: {
-        pid: process.pid,
-        activity,
-      },
-      nonce: crypto.randomUUID(),
-    });
+    return this.request(Command.SET_ACTIVITY, { pid: process.pid ?? null, activity });
+  }
+
+  /**
+   * Clears the current Rich Presence activity.
+   * @returns void
+   */
+  clearActivity() {
+    if (!this.isReady) {
+      console.warn('Attempted to clear activity before client was ready.');
+      return;
+    }
+
+    return this.request(Command.SET_ACTIVITY, { pid: process.pid ?? null, activity: null });
   }
 
   /**
@@ -260,5 +284,110 @@ export class Client extends EventEmitter {
     extension = isAnimated && !forceStatic ? 'gif' : extension;
 
     return `https://cdn.discordapp.com/avatars/${userId}/${avatarHash}.${extension}?size=${size}`;
+  }
+
+  /**
+   * Retrieves the user's relationships.
+   * @returns Promise that resolves with the user's relationships
+   */
+  getRelationships(): Promise<any> {
+    return this.request(Command.GET_RELATIONSHIPS);
+  }
+
+  /**
+   * Creates a new lobby.
+   * @param type Lobby type (private or public)
+   * @param capacity Maximum number of members in the lobby
+   * @param metadata Additional metadata for the lobby
+   * @returns Promise that resolves with the created lobby information
+   */
+  createLobby(type: LobbyType, capacity: number, metadata: object): Promise<any> {
+    return this.request(Command.CREATE_LOBBY, {
+      type,
+      capacity,
+      metadata,
+    });
+  }
+
+  /**
+   * Deletes a lobby by its ID.
+   * @param lobbyId ID of the lobby to delete
+   * @returns Promise that resolves when the lobby is deleted
+   */
+  deleteLobby(lobbyId: string): Promise<any> {
+    return this.request(Command.DELETE_LOBBY, {
+      id: lobbyId,
+    });
+  }
+
+  /**
+   * Updates a lobby's information.
+   * @param lobbyId ID of the lobby to update
+   * @param param1 Object containing optional update fields
+   * @returns Promise that resolves with the updated lobby information
+   */
+  updateLobby(
+    lobbyId: string,
+    { type, ownerId, capacity, metadata }: { type?: LobbyType; ownerId?: string; capacity?: number; metadata?: object } = {},
+  ): Promise<any> {
+    return this.request(Command.UPDATE_LOBBY, {
+      id: lobbyId,
+      type,
+      owner_id: ownerId,
+      capacity,
+      metadata,
+    });
+  }
+
+  /**
+   * Connects to a lobby using its ID and secret.
+   * @param lobbyId ID of the lobby to connect to
+   * @param secret Secret key for the lobby
+   * @returns Promise that resolves when connected to the lobby
+   */
+  connectToLobby(lobbyId: string, secret: string): Promise<any> {
+    return this.request(Command.CONNECT_TO_LOBBY, {
+      id: lobbyId,
+      secret,
+    });
+  }
+
+  /**
+   * Sends data to all members of a lobby.
+   * @param lobbyId ID of the lobby
+   * @param data Data to send to the lobby members
+   * @returns Promise that resolves when the data is sent
+   */
+  sendToLobby(lobbyId: string, data: any): Promise<any> {
+    return this.request(Command.SEND_TO_LOBBY, {
+      id: lobbyId,
+      data,
+    });
+  }
+
+  /**
+   * Disconnects from a lobby by its ID.
+   * @param lobbyId ID of the lobby to disconnect from
+   * @returns Promise that resolves when disconnected from the lobby
+   */
+  disconnectFromLobby(lobbyId: string): Promise<any> {
+    return this.request(Command.DISCONNECT_FROM_LOBBY, {
+      id: lobbyId,
+    });
+  }
+
+  /**
+   * Updates a lobby member's information.
+   * @param lobbyId ID of the lobby
+   * @param userId ID of the user/member
+   * @param param2 Object containing optional update fields
+   * @returns
+   */
+  updateLobbyMember(lobbyId: string, userId: string, { metadata }: { metadata?: object } = {}): Promise<any> {
+    return this.request(Command.UPDATE_LOBBY_MEMBER, {
+      lobby_id: lobbyId,
+      user_id: userId,
+      metadata,
+    });
   }
 }
