@@ -1,4 +1,3 @@
-import { PresenceBuilder } from './src/builder.js';
 import { Client } from './src/client.js';
 
 // Environment variable for Discord Client ID
@@ -24,12 +23,15 @@ process.on('SIGTERM', shutdown);
 const response = await client.login({ clientId: DISCORD_CLIENT_ID });
 console.log('Logged in as:', response.user.username);
 
-const presence = new PresenceBuilder()
-  .setDetails('Testing new-rpc library')
-  .setState('In the playground')
-  .setStartTimestamp(Date.now())
-  .setLargeImage('whitesur', 'Icon');
-client.setActivity(presence.build());
+console.log('User Default Avatar URL:', client.getAvatarUrl(response.user.id));
+console.log('User Custom Avatar URL:', client.getAvatarUrl(response.user.id, response.user.avatar, { extension: 'webp', size: 512, forceStatic: false }));
+
+// const presence = new PresenceBuilder()
+//   .setDetails('Testing new-rpc library')
+//   .setState('In the playground')
+//   .setStartTimestamp(Date.now())
+//   .setLargeImage('whitesur', 'Icon');
+// client.setActivity(presence.build());
 
 // // 1. Get a code from the UI
 // const { code } = await client.authorize({ clientId: DISCORD_CLIENT_ID, scopes: ['rpc', 'identify'] });

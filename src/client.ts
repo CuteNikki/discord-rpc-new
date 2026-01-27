@@ -234,4 +234,31 @@ export class Client extends EventEmitter {
       nonce: crypto.randomUUID(),
     });
   }
+
+  /**
+   * Generates a URL for a user's avatar.
+   * @param userId User's ID
+   * @param avatarHash User's avatar hash
+   * @param options Optional parameters for the avatar URL
+   * @returns URL string for the user's avatar
+   */
+  getAvatarUrl(
+    userId: string,
+    avatarHash?: string | null,
+    options?: { extension?: 'webp' | 'png' | 'gif' | 'jpeg'; size?: number; forceStatic?: boolean },
+  ): string {
+    let extension = options?.extension || 'png';
+    const size = options?.size || 512;
+    const forceStatic = options?.forceStatic || false;
+
+    if (!avatarHash || avatarHash === 'default') {
+      return `https://cdn.discordapp.com/embed/avatars/${(BigInt(userId) >> 22n) % 6n}.png`;
+    }
+
+    const isAnimated = avatarHash.startsWith('a_');
+    // if is animated and not forcing static, use gif
+    extension = isAnimated && !forceStatic ? 'gif' : extension;
+
+    return `https://cdn.discordapp.com/avatars/${userId}/${avatarHash}.${extension}?size=${size}`;
+  }
 }
