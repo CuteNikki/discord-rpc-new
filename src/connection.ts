@@ -2,7 +2,57 @@
 import { connect, type Socket } from 'node:net';
 import { join } from 'node:path';
 // Types
-import type { OpCode } from './types';
+import type { OpCode, PathData } from './types';
+import { existsSync, realpathSync } from 'node:fs';
+
+const IPC_SOCKET_NAME = "discord-ipc";
+const WINDOWS_IPC_PIPE_PATH = `\\\\?\\pipe\\${IPC_SOCKET_NAME}`;
+
+const { XDG_RUNTIME_DIR, TMPDIR, TMP, TEMP } = process.env;
+const UNIX_TEMP_DIR_FALLBACK = "/tmp";
+
+const defaultPathList: PathData[] = [
+  {
+    platform: ["win32"],
+    format: (id) => `${WINDOWS_IPC_PIPE_PATH}-${id}`,
+  },
+  // MacOS and Linux
+  {
+    platform: ["darwin", "linux"],
+    format: (id) => {
+      const prefix = realpathSync(
+        XDG_RUNTIME_DIR ?? TMPDIR ?? TMP ?? TEMP ?? UNIX_TEMP_DIR_FALLBACK,
+      );
+      return join(prefix, `${IPC_SOCKET_NAME}-${id}`);
+    },
+  },
+  // Linux (Snap)
+  {
+    platform: ["linux"],
+    format: (id) => {
+      const prefix = realpathSync(
+        XDG_RUNTIME_DIR ?? TMPDIR ?? TMP ?? TEMP ?? UNIX_TEMP_DIR_FALLBACK,
+      );
+      return join(prefix, "snap.discord", `${IPC_SOCKET_NAME}-${id}`);
+    },
+  },
+  // Linux (Flatpak)
+  {
+    platform: ["linux"],
+    format: (id) => {
+      const prefix = realpathSync(
+        XDG_RUNTIME_DIR ?? TMPDIR ?? TMP ?? TEMP ?? UNIX_TEMP_DIR_FALLBACK,
+      );
+
+      return join(
+        prefix,
+        "app",
+        "com.discordapp.Discord",
+        `${IPC_SOCKET_NAME}-${id}`,
+      );
+    },
+  },
+];
 
 export class SocketConnection {
   /**
@@ -20,20 +70,6 @@ export class SocketConnection {
   private dataCallback?: (op: OpCode, data: any) => void;
 
   /**
-   * Constructs the pipe path based on the OS and index.
-   * @param index Pipe index (0-9)
-   * @returns Pipe path string
-   */
-  private getPipePath(index: number): string {
-    if (process.platform === 'win32') {
-      return `\\\\.\\pipe\\discord-ipc-${index}`;
-    }
-    const { XDG_RUNTIME_DIR, TMPDIR, TMP, TEMP } = process.env;
-    const prefix = XDG_RUNTIME_DIR || TMPDIR || TMP || TEMP || '/tmp';
-    return join(prefix, `discord-ipc-${index}`);
-  }
-
-  /**
    * Connects to the Discord IPC socket.
    * @param index Pipe index (0-9)
    * @returns Promise that resolves when connected
@@ -43,33 +79,48 @@ export class SocketConnection {
       throw new Error('Could not find a running Discord instance after searching 10 pipes.');
     }
 
+    const useablePath: string[] = [];
+    for (const path of defaultPathList) {
+      if (!path.platform.includes(process.platform)) continue;
+      const socketPath = path.format(index);
+
+      // Skip if the socket path doesn't exist (only for non-Windows platforms)
+      if (process.platform !== "win32" && !existsSync(socketPath)) continue;
+      useablePath.push(socketPath);
+    }
+
+    if (useablePath.length === 0) {
+      // Skip to the next pipe ID if no useable path is found
+      return this.connect(index + 1);
+    }
+
     return new Promise((resolve, reject) => {
-      const path = this.getPipePath(index);
-
-      // Clean up old socket if it exists from a previous failed attempt
-      if (this.socket) {
-        this.socket.destroy();
-        this.socket.removeAllListeners();
-      }
-
-      this.socket = connect(path);
-
-      this.socket.once('connect', () => {
-        this.socket?.removeAllListeners('error'); // Stop the retry logic once connected
-        this.setupBufferHandler();
-        resolve();
-      });
-
-      this.socket.once('error', (err: any) => {
-        this.socket?.destroy();
-
-        // Only retry if the pipe doesn't exist
-        if (err.code === 'ENOENT') {
-          resolve(this.connect(index + 1));
-        } else {
-          reject(err);
+      for (const path of useablePath) {
+        // Clean up old socket if it exists from a previous failed attempt
+        if (this.socket) {
+          this.socket.destroy();
+          this.socket.removeAllListeners();
         }
-      });
+
+        this.socket = connect(path);
+
+        this.socket.once('connect', () => {
+          this.socket?.removeAllListeners('error'); // Stop the retry logic once connected
+          this.setupBufferHandler();
+          resolve();
+        });
+
+        this.socket.once('error', (err: any) => {
+          this.socket?.destroy();
+
+          // Only retry if the pipe doesn't exist
+          if (err.code === 'ENOENT') {
+            resolve(this.connect(index + 1));
+          } else {
+            reject(err);
+          }
+        });
+      }
     });
   }
 
@@ -127,5 +178,16 @@ export class SocketConnection {
    */
   onData(callback: (op: OpCode, data: any) => void) {
     this.dataCallback = callback;
+  }
+
+  /**
+   * Sets a custom path list for the socket connection.
+   * @param pathList Array of PathData objects
+   */
+  setPathList(pathList: PathData[]) {
+    for (const pat of pathList) {
+      // Add the path to the beginning of the list
+      defaultPathList.unshift(pat);
+    }
   }
 }

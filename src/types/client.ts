@@ -1,4 +1,32 @@
 /**
+ * Path data for the socket connection
+ */
+export interface PathData {
+  /**
+   * Platforms that use this path format
+   */
+  platform: NodeJS.Platform[];
+  /**
+   * Format to get the socket path from the pipe index
+   * @param index Pipe index (0-9)
+   * @returns Path to the socket
+   * @example
+   * (index) => `\\\\?\\pipe\\discord-ipc-${index}`
+   */
+  format: (index: number) => string;
+}
+
+/**
+ * Options for the Client constructor
+ */
+export type ClientOptions = {
+  /**
+   * Custom path list for the socket connection
+   */
+  pathList?: PathData[];
+}
+
+/**
  * Response from READY event
  */
 export type ReadyResponse = {
