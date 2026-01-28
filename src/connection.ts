@@ -185,9 +185,9 @@ export class SocketConnection {
    * @param pathList Array of PathData objects
    */
   setPathList(pathList: PathData[]) {
-    for (const pat of pathList) {
+    for (const path of pathList) {
       // Add the path to the beginning of the list
-      defaultPathList.unshift(pat);
+      defaultPathList.unshift(path);
     }
   }
 }
