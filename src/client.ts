@@ -3,7 +3,7 @@ import { EventEmitter } from 'node:events';
 // Internal
 import { SocketConnection } from './connection';
 // Types
-import { Command, Event, LobbyType, OpCode, type ActivityPayload, type AuthenticateResponse, type AuthorizeResponse, type ReadyResponse } from './types';
+import { Command, Event, LobbyType, OpCode, type ActivityPayload, type AuthenticateResponse, type AuthorizeResponse, type ClientOptions, type ReadyResponse } from './types';
 
 /**
  * Main RPC Client for managing Discord Rich Presence.
@@ -27,8 +27,13 @@ export class Client extends EventEmitter {
   /**
    * Initializes a new RPC Client instance.
    */
-  constructor() {
+  constructor(options?: ClientOptions) {
     super();
+
+    // Set custom path list if provided
+    if (options?.pathList) {
+      this.connection.setPathList(options.pathList);
+    }
 
     // Centralized data handler
     this.connection.onData((op: OpCode, data: any) => {
