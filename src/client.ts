@@ -35,6 +35,16 @@ export class Client extends EventEmitter {
   private clientId?: string;
 
   /**
+   * Timer for attempting reconnection if the connection is lost
+   */
+  private reconnectTimer?: ReturnType<typeof setTimeout>;
+
+  /**
+   * Stores the last activity payload for potential reconnection scenarios
+   */
+  private lastActivity?: ActivityPayload;
+
+  /**
    * Initializes a new RPC Client instance.
    */
   constructor(options?: ClientOptions) {
@@ -48,6 +58,14 @@ export class Client extends EventEmitter {
     // Centralized data handler
     this.connection.onData((op: OpCode, data: any) => {
       this.handleIncoming(op, data);
+    });
+
+    this.connection.onClose(() => {
+      if (this.isReady) {
+        this.isReady = false;
+        this.emit('disconnected');
+        this.attemptReconnect();
+      }
     });
   }
 
@@ -75,6 +93,10 @@ export class Client extends EventEmitter {
       if (data.evt === Event.READY) {
         this.isReady = true;
         this.emit(Event.READY, data.data);
+
+        if (this.lastActivity) {
+          this.setActivity(this.lastActivity);
+        }
       }
 
       if (data.evt === Event.ERROR) {
@@ -102,7 +124,7 @@ export class Client extends EventEmitter {
     accessToken?: string;
   }): Promise<ReadyResponse> {
     this.clientId = clientId;
-    await this.connection.connect();
+    await this.connectWithRetry();
 
     return new Promise((resolve) => {
       this.once(Event.READY, (data) => {
@@ -110,9 +132,35 @@ export class Client extends EventEmitter {
         setInterval(() => this.ping(), 30_000);
         resolve(data);
       });
-
-      this.connection.send(OpCode.HANDSHAKE, { v: 1, client_id: clientId });
     });
+  }
+
+  /**
+   * Attempts to reconnect to Discord with exponential backoff.
+   */
+  private async connectWithRetry() {
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+
+    try {
+      await this.connection.connect();
+      // If we get here, we connected! Send Handshake immediately.
+      this.connection.send(OpCode.HANDSHAKE, { v: 1, client_id: this.clientId });
+    } catch (err) {
+      console.log('Failed to connect to Discord. Retrying in 5s...');
+      this.attemptReconnect();
+    }
+  }
+
+  /**
+   * Sets a timer to attempt reconnection after a delay if the connection is lost.
+   */
+  private attemptReconnect() {
+    // Prevent multiple timers
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+
+    this.reconnectTimer = setTimeout(() => {
+      this.connectWithRetry();
+    }, 5_000);
   }
 
   /**
@@ -120,10 +168,10 @@ export class Client extends EventEmitter {
    * @returns Promise that resolves when the client is destroyed
    */
   async destroy() {
+    // Prevent auto-reconnect logic from firing
+    this.isReady = false;
     // Clear activity before destroying
-    this.clearActivity();
-    // Wait a moment to ensure the message is sent before closing
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await this.clearActivity();
     // Destroy the underlying connection
     this.connection.destroy();
   }
@@ -253,6 +301,8 @@ export class Client extends EventEmitter {
    * @returns void
    */
   setActivity(activity: ActivityPayload) {
+    this.lastActivity = activity;
+
     if (!this.isReady) {
       console.warn('Attempted to set activity before client was ready.');
       return;
@@ -266,6 +316,8 @@ export class Client extends EventEmitter {
    * @returns void
    */
   clearActivity() {
+    this.lastActivity = undefined;
+
     if (!this.isReady) {
       console.warn('Attempted to clear activity before client was ready.');
       return;

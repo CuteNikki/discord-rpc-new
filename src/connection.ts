@@ -59,6 +59,11 @@ export class SocketConnection {
   private dataCallback?: (op: OpCode, data: any) => void;
 
   /**
+   * Callback for socket close event
+   */
+  private closeCallback?: () => void;
+
+  /**
    * Connects to the Discord IPC socket.
    * @param index Pipe index (0-9)
    * @returns Promise that resolves when connected
@@ -140,6 +145,10 @@ export class SocketConnection {
         }
       }
     });
+
+    this.socket?.on('close', () => {
+      this.closeCallback?.();
+    });
   }
 
   /**
@@ -178,5 +187,13 @@ export class SocketConnection {
       // Add the path to the beginning of the list
       defaultPathList.unshift(path);
     }
+  }
+
+  /**
+   * Registers a callback for when the socket connection is closed.
+   * @param callback Function to call when the socket is closed
+   */
+  onClose(callback: () => void) {
+    this.closeCallback = callback;
   }
 }
