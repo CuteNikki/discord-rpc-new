@@ -3,7 +3,17 @@ import { EventEmitter } from 'node:events';
 // Internal
 import { SocketConnection } from './connection';
 // Types
-import { Command, Event, LobbyType, OpCode, type ActivityPayload, type AuthenticateResponse, type AuthorizeResponse, type ClientOptions, type ReadyResponse } from './types';
+import {
+  Command,
+  Event,
+  LobbyType,
+  OpCode,
+  type ActivityPayload,
+  type AuthenticateResponse,
+  type AuthorizeResponse,
+  type ClientOptions,
+  type ReadyResponse,
+} from './types';
 
 /**
  * Main RPC Client for managing Discord Rich Presence.

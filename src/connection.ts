@@ -2,54 +2,43 @@
 import { connect, type Socket } from 'node:net';
 import { join } from 'node:path';
 // Types
-import type { OpCode, PathData } from './types';
 import { existsSync, realpathSync } from 'node:fs';
+import type { OpCode, PathData } from './types';
 
-const IPC_SOCKET_NAME = "discord-ipc";
+const IPC_SOCKET_NAME = 'discord-ipc';
 const WINDOWS_IPC_PIPE_PATH = `\\\\?\\pipe\\${IPC_SOCKET_NAME}`;
 
 const { XDG_RUNTIME_DIR, TMPDIR, TMP, TEMP } = process.env;
-const UNIX_TEMP_DIR_FALLBACK = "/tmp";
+const UNIX_TEMP_DIR_FALLBACK = '/tmp';
 
 const defaultPathList: PathData[] = [
   {
-    platform: ["win32"],
+    platform: ['win32'],
     format: (id) => `${WINDOWS_IPC_PIPE_PATH}-${id}`,
   },
   // MacOS and Linux
   {
-    platform: ["darwin", "linux"],
+    platform: ['darwin', 'linux'],
     format: (id) => {
-      const prefix = realpathSync(
-        XDG_RUNTIME_DIR ?? TMPDIR ?? TMP ?? TEMP ?? UNIX_TEMP_DIR_FALLBACK,
-      );
+      const prefix = realpathSync(XDG_RUNTIME_DIR ?? TMPDIR ?? TMP ?? TEMP ?? UNIX_TEMP_DIR_FALLBACK);
       return join(prefix, `${IPC_SOCKET_NAME}-${id}`);
     },
   },
   // Linux (Snap)
   {
-    platform: ["linux"],
+    platform: ['linux'],
     format: (id) => {
-      const prefix = realpathSync(
-        XDG_RUNTIME_DIR ?? TMPDIR ?? TMP ?? TEMP ?? UNIX_TEMP_DIR_FALLBACK,
-      );
-      return join(prefix, "snap.discord", `${IPC_SOCKET_NAME}-${id}`);
+      const prefix = realpathSync(XDG_RUNTIME_DIR ?? TMPDIR ?? TMP ?? TEMP ?? UNIX_TEMP_DIR_FALLBACK);
+      return join(prefix, 'snap.discord', `${IPC_SOCKET_NAME}-${id}`);
     },
   },
   // Linux (Flatpak)
   {
-    platform: ["linux"],
+    platform: ['linux'],
     format: (id) => {
-      const prefix = realpathSync(
-        XDG_RUNTIME_DIR ?? TMPDIR ?? TMP ?? TEMP ?? UNIX_TEMP_DIR_FALLBACK,
-      );
+      const prefix = realpathSync(XDG_RUNTIME_DIR ?? TMPDIR ?? TMP ?? TEMP ?? UNIX_TEMP_DIR_FALLBACK);
 
-      return join(
-        prefix,
-        "app",
-        "com.discordapp.Discord",
-        `${IPC_SOCKET_NAME}-${id}`,
-      );
+      return join(prefix, 'app', 'com.discordapp.Discord', `${IPC_SOCKET_NAME}-${id}`);
     },
   },
 ];
@@ -85,7 +74,7 @@ export class SocketConnection {
       const socketPath = path.format(index);
 
       // Skip if the socket path doesn't exist (only for non-Windows platforms)
-      if (process.platform !== "win32" && !existsSync(socketPath)) continue;
+      if (process.platform !== 'win32' && !existsSync(socketPath)) continue;
       useablePath.push(socketPath);
     }
 

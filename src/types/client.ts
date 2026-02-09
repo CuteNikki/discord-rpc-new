@@ -24,7 +24,7 @@ export type ClientOptions = {
    * Custom path list for the socket connection
    */
   pathList?: PathData[];
-}
+};
 
 /**
  * Response from READY event
