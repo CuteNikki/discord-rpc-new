@@ -70,6 +70,14 @@ export class Client extends EventEmitter {
   }
 
   /**
+   * Indicates whether the client is currently connected and ready to send/receive commands.
+   * @returns boolean indicating connection status
+   */
+  public get isConnected() {
+    return this.isReady;
+  }
+
+  /**
    * Handles incoming data from Discord.
    * @param op OpCode of the incoming message
    * @param data Payload data
