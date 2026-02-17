@@ -71,9 +71,10 @@ export class Client extends EventEmitter {
   }
 
   /**
-   * Indicates whether the client is currently connected and ready to send/receive data.
+   * Indicates whether the client is currently connected and ready to send/receive commands.
+   * @returns boolean indicating connection status
    */
-  get connected() {
+  public get isConnected() {
     return this.isReady;
   }
 
