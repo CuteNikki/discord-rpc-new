@@ -1,4 +1,5 @@
 // Libraries
+import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 // Internal
 import { SocketConnection } from './connection';
@@ -188,7 +189,7 @@ export class Client extends EventEmitter {
    * Sends a ping to Discord to keep the connection alive.
    */
   ping() {
-    this.connection.send(OpCode.PING, { nonce: crypto.randomUUID() });
+    this.connection.send(OpCode.PING, { nonce: randomUUID() });
   }
 
   /**
@@ -199,7 +200,7 @@ export class Client extends EventEmitter {
    * @returns Promise that resolves with the command response
    */
   async request(cmd: Command, args?: object, evt?: Event): Promise<any> {
-    const nonce = crypto.randomUUID();
+    const nonce = randomUUID();
 
     return new Promise((resolve, reject) => {
       // Create a specific handler for this command + nonce
