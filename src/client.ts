@@ -191,6 +191,10 @@ export class Client extends EventEmitter {
       clearInterval(this.heartbeatTimer);
       this.heartbeatTimer = undefined;
     }
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = undefined;
+    }
 
     // Clear activity before destroying
     await this.clearActivity();
