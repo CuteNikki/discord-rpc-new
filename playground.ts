@@ -32,9 +32,9 @@ const presence = new PresenceBuilder()
   .setState('In the playground')
   .setStartTimestamp(Date.now())
   .setLargeImage('whitesur', 'Icon')
-  .setParty('party1234', 1, 4)
-  // .setSecrets({ join: 'party1234_join' })
-  .addButton('Join Party', 'https://example.com/join');
+  .setParty('party1234', 1, 4);
+// .setSecrets({ join: 'party1234_join' })
+// .addButton('Join Party', 'https://example.com/join');
 client.setActivity(presence.build());
 
 // // 1. Get a code from the UI
