@@ -36,6 +36,11 @@ export class Client extends EventEmitter {
   private clientId?: string;
 
   /**
+   * Timer for heartbeat pings to keep the connection alive
+   */
+  private heartbeatTimer?: ReturnType<typeof setInterval>;
+
+  /**
    * Timer for attempting reconnection if the connection is lost
    */
   private reconnectTimer?: ReturnType<typeof setTimeout>;
@@ -137,8 +142,9 @@ export class Client extends EventEmitter {
 
     return new Promise((resolve) => {
       this.once(Event.READY, (data) => {
-        // Start heartbeat
-        setInterval(() => this.ping(), 30_000);
+        // Clear any previous heartbeat and start a new one
+        if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
+        this.heartbeatTimer = setInterval(() => this.ping(), 30_000);
         resolve(data);
       });
     });
@@ -179,6 +185,17 @@ export class Client extends EventEmitter {
   async destroy() {
     // Prevent auto-reconnect logic from firing
     this.isReady = false;
+
+    // Clear timers
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = undefined;
+    }
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = undefined;
+    }
+
     // Clear activity before destroying
     await this.clearActivity();
     // Destroy the underlying connection
