@@ -22,7 +22,9 @@ process.on('SIGTERM', shutdown);
 
 // Login and print user info
 const response = await client.login({ clientId: DISCORD_CLIENT_ID });
-console.log('Logged in as:', response.user.username);
+console.log('Logged in!', response);
+
+const avatarUrl = client.getAvatarUrl(response.user.id, response.user.avatar, { extension: 'webp', size: 512, forceStatic: false });
 
 // console.log('User Default Avatar URL:', client.getAvatarUrl(response.user.id));
 // console.log('User Custom Avatar URL:', client.getAvatarUrl(response.user.id, response.user.avatar, { extension: 'webp', size: 512, forceStatic: false }));
@@ -32,6 +34,7 @@ const presence = new PresenceBuilder()
   .setState('In the playground')
   .setStartTimestamp(Date.now())
   .setLargeImage('whitesur', 'Icon')
+  .setSmallImage(avatarUrl, 'Avatar Test')
   .setParty('party1234', 1, 4);
 // .setSecrets({ join: 'party1234_join' })
 // .addButton('Join Party', 'https://example.com/join');
