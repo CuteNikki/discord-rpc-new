@@ -183,9 +183,6 @@ export class Client extends EventEmitter {
    * @returns Promise that resolves when the client is destroyed
    */
   async destroy() {
-    // Prevent auto-reconnect logic from firing
-    this.isReady = false;
-
     // Clear timers
     if (this.heartbeatTimer) {
       clearInterval(this.heartbeatTimer);
@@ -198,6 +195,8 @@ export class Client extends EventEmitter {
 
     // Clear activity before destroying
     await this.clearActivity();
+    // Prevent auto-reconnect logic from firing
+    this.isReady = false;
     // Destroy the underlying connection
     this.connection.destroy();
   }
