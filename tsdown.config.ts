@@ -1,5 +1,8 @@
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'tsdown/config';
 
+const __dirname = dirname(fileURLToPath(import.meta.url));
 const config = defineConfig([
 	{
 		entry: 'src/index.ts',
@@ -9,8 +12,11 @@ const config = defineConfig([
 		dts: false,
 		exports: true,
 		fixedExtension: true,
-    minify: true,
+		minify: true,
 		shims: true,
+		alias: {
+			crypto: resolve(__dirname, './src/polyfills/crypto.ts'),
+		},
 	},
 	{
 		entry: 'src/index.ts',
@@ -38,7 +44,7 @@ const config = defineConfig([
 					}),
 				),
 		},
-    minify: true,
+		minify: true,
 		fixedExtension: true,
 	},
 ]);
