@@ -1,8 +1,8 @@
 // Libraries
+import { existsSync, realpathSync } from 'node:fs';
 import { connect, type Socket } from 'node:net';
 import { join } from 'node:path';
 // Types
-import { existsSync, realpathSync } from 'node:fs';
 import type { OpCode, PathData } from './types';
 
 const IPC_SOCKET_NAME = 'discord-ipc';
