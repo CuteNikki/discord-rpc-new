@@ -3,6 +3,7 @@
 version: 2
 updates:
   - package-ecosystem: 'bun'
+    versioning-strategy: increase
     directory: '/'
     schedule:
       interval: 'daily'
