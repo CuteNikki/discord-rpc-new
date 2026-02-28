@@ -1,7 +1,7 @@
 {
   "name": "discord-rpc-new",
   "type": "module",
-  "version": "1.3.2",
+  "version": "1.3.3",
   "description": "A lightweight, typed Discord RPC client",
   "keywords": [
     "discord",
