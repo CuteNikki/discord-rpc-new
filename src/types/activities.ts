@@ -39,12 +39,15 @@ export interface Secrets {
 
 /**
  * Enum for activity types.
+ *
+ * When using SET_ACTIVITY, the activity object is limited to a type of Playing (0), Listening (2), Watching (3), or Competing (5).
  */
 export enum ActivityType {
   Playing = 0,
   Streaming = 1,
   Listening = 2,
   Watching = 3,
+  Custom = 4,
   Competing = 5,
 }
 
