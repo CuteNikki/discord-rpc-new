@@ -10,8 +10,8 @@ export class PresenceBuilder {
   private payload: Partial<ActivityPayload> = {};
 
   /**
-   * Sets the activity type (eg. Playing, Streaming, Listening, Watching).
-   * @param type Activity type as defined by Discord (0-5)
+   * Sets the activity type (eg. Playing, Listening, Watching, Competing).
+   * @param type Activity type as defined by Discord (0, 2, 3, 5)
    * @returns The PresenceBuilder instance for chaining
    */
   setType(type: ActivityType): this {
@@ -22,28 +22,36 @@ export class PresenceBuilder {
   /**
    * Sets the details of the activity.
    * @param details Details string (Max 128 chars)
+   * @param url Optional URL when clicking the details text
    * @returns The PresenceBuilder instance for chaining
    * @throws Error if details exceed character limit
    */
-  setDetails(details: string): this {
+  setDetails(details: string, url?: string): this {
     if (details.length > 128) {
       throw new Error('Details must be 128 characters or fewer.');
     }
     this.payload.details = details;
+    if (url) {
+      this.payload.details_url = url;
+    }
     return this;
   }
 
   /**
    * Sets the state of the activity.
    * @param state State string (Max 128 chars)
+   * @param url Optional URL when clicking the state text
    * @returns The PresenceBuilder instance for chaining
    * @throws Error if state exceeds character limit
    */
-  setState(state: string): this {
+  setState(state: string, url?: string): this {
     if (state.length > 128) {
       throw new Error('State must be 128 characters or fewer.');
     }
     this.payload.state = state;
+    if (url) {
+      this.payload.state_url = url;
+    }
     return this;
   }
 
@@ -104,10 +112,11 @@ export class PresenceBuilder {
    * Sets the large image for the activity.
    * @param key The key of the large image asset (defined in your Discord application)
    * @param text Optional tooltip text for the large image (Max 128 chars)
+   * @param url Optional URL when the large image is clicked
    * @returns The PresenceBuilder instance for chaining
    * @throws Error if text exceeds character limit
    */
-  setLargeImage(key: string, text?: string): this {
+  setLargeImage(key: string, text?: string, url?: string): this {
     if (text && text.length > 128) {
       throw new Error('Large image text must be 128 characters or fewer.');
     }
@@ -115,6 +124,7 @@ export class PresenceBuilder {
       ...this.payload.assets,
       large_image: key,
       large_text: text,
+      large_url: url,
     };
     return this;
   }
@@ -123,10 +133,11 @@ export class PresenceBuilder {
    * Sets the small image for the activity.
    * @param key The key of the small image asset (defined in your Discord application)
    * @param text Optional tooltip text for the small image (Max 128 chars)
+   * @param url Optional URL when the small image is clicked
    * @returns The PresenceBuilder instance for chaining
    * @throws Error if text exceeds character limit
    */
-  setSmallImage(key: string, text?: string): this {
+  setSmallImage(key: string, text?: string, url?: string): this {
     if (text && text.length > 128) {
       throw new Error('Small image text must be 128 characters or fewer.');
     }
@@ -134,6 +145,7 @@ export class PresenceBuilder {
       ...this.payload.assets,
       small_image: key,
       small_text: text,
+      small_url: url,
     };
     return this;
   }
@@ -146,9 +158,6 @@ export class PresenceBuilder {
    * @returns The PresenceBuilder instance for chaining
    */
   setParty(id: string, current: number, max: number): this {
-    if (this.payload.buttons?.length) {
-      throw new Error('Discord RPC does not display Buttons if Party or Secrets are present. Cannot set Party.');
-    }
     this.payload.party = { id, size: [current, max] };
     return this;
   }
@@ -159,9 +168,6 @@ export class PresenceBuilder {
    * @returns The PresenceBuilder instance for chaining
    */
   setSecrets(secrets: { join?: string; spectate?: string; match?: string }): this {
-    if (this.payload.buttons?.length) {
-      throw new Error('Discord RPC does not display Buttons if Party or Secrets are present. Cannot set Secrets.');
-    }
     this.payload.secrets = secrets;
     return this;
   }
@@ -178,17 +184,13 @@ export class PresenceBuilder {
 
   /**
    * Sets buttons for the activity.
-   * Also, buttons will not display if Party or Secrets are present due to Discord RPC limitations.
    * @param buttons Array of button objects with label and url
    * @returns The PresenceBuilder instance for chaining
-   * @throws Error if button constraints are violated or if Party/Secrets are present
+   * @throws Error if more than 2 buttons are provided or character limits are exceeded
    */
   setButtons(buttons: { label: string; url: string }[]): this {
     if (buttons.length > 2) {
       throw new Error('A maximum of 2 buttons are allowed.');
-    }
-    if (this.payload.party || this.payload.secrets) {
-      throw new Error('Discord RPC does not display Buttons if Party or Secrets are present. Buttons may be ignored.');
     }
     for (const btn of buttons) {
       this.validateButton(btn.label, btn.url);
@@ -202,7 +204,7 @@ export class PresenceBuilder {
    * @param label Button label (Max 32 chars)
    * @param url Button URL (Max 512 chars)
    * @returns The PresenceBuilder instance for chaining
-   * @throws Error if button constraints are violated or if Party/Secrets are present
+   * @throws Error if button constraints are violated
    */
   addButton(label: string, url: string): this {
     if (!this.payload.buttons) {
@@ -222,8 +224,10 @@ export class PresenceBuilder {
    * @returns The constructed ActivityPayload ready to be sent to Discord
    */
   build(): ActivityPayload {
-    if (this.payload.buttons?.length && (this.payload.party || this.payload.secrets)) {
-      throw new Error('Discord RPC does not display Buttons if Party or Secrets are present. Buttons may be ignored.');
+    if (this.payload.buttons?.length && (this.payload.secrets?.join || this.payload.secrets?.spectate)) {
+      console.warn(
+        '[discord-rpc-new] Warning: You have set both custom Buttons and Join/Spectate Secrets. Discord will prioritize the native Join/Spectate buttons and your custom buttons will likely be hidden.',
+      );
     }
 
     return this.payload as ActivityPayload;
