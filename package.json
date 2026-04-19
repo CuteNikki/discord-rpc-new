@@ -3,6 +3,7 @@
   "type": "module",
   "version": "1.4.0",
   "description": "A lightweight, typed Discord RPC client",
+  "license": "MIT",
   "keywords": [
     "discord",
     "rpc",
