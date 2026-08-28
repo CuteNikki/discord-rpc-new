@@ -24,6 +24,11 @@ export type ClientOptions = {
    * Custom path list for the socket connection
    */
   pathList?: PathData[];
+  /**
+   * Maximum number of automatic reconnect attempts before the client gives up
+   * and emits 'reconnect_failed'. Defaults to Infinity (previous behavior).
+   */
+  maxReconnectAttempts?: number;
 };
 
 /**
