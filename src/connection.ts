@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs';
 import { connect, type Socket } from 'node:net';
 import { join } from 'node:path';
 // Types
-import type { OpCode, PathData } from './types';
+import { OpCode, type PathData, type Transport, type TransportMessage } from './types';
 
 const IPC_SOCKET_NAME = 'discord-ipc';
 const WINDOWS_IPC_PIPE_PATH = `\\\\?\\pipe\\${IPC_SOCKET_NAME}`;
@@ -41,32 +41,13 @@ for (const app of flatpakApps) {
   });
 }
 
-export class SocketConnection {
-  /**
-   * Socket connection to Discord IPC
-   */
+export class SocketConnection implements Transport {
   private socket?: Socket;
-  /**
-   * Buffer for incoming data
-   */
   private buffer = Buffer.alloc(0);
-
-  /**
-   * Callback for incoming data
-   */
-  private dataCallback?: (op: OpCode, data: any) => void;
-
-  /**
-   * Callback for socket close event
-   */
+  private messageCallback?: (message: TransportMessage) => void;
   private closeCallback?: () => void;
 
-  /**
-   * Connects to the Discord IPC socket.
-   * @param index Pipe index (0-9)
-   * @returns Promise that resolves when connected
-   */
-  async connect(index = 0): Promise<void> {
+  async connect(clientId: string, index = 0): Promise<void> {
     if (index > 9) {
       throw new Error('Could not find a running Discord instance after searching 10 pipes.');
     }
@@ -83,7 +64,7 @@ export class SocketConnection {
 
     if (useablePath.length === 0) {
       // Skip to the next pipe ID if no useable path is found
-      return this.connect(index + 1);
+      return this.connect(clientId, index + 1);
     }
 
     return new Promise((resolve, reject) => {
@@ -107,61 +88,26 @@ export class SocketConnection {
 
           // Only retry if the pipe doesn't exist
           if (err.code === 'ENOENT') {
-            resolve(this.connect(index + 1));
+            resolve(this.connect(clientId, index + 1));
           } else {
             reject(err);
           }
         });
       }
     });
+
   }
 
-  /**
-   * Preserves your original buffering logic while linking it
-   * to the Client's centralized handler.
-   */
-  private setupBufferHandler() {
-    this.socket?.on('data', (chunk: Buffer) => {
-      // Your original logic: Append new data to our existing buffer
-      this.buffer = Buffer.concat([this.buffer, chunk]);
-
-      // Process all full packets in the buffer
-      while (this.buffer.length >= 8) {
-        const op = this.buffer.readUInt32LE(0);
-        const len = this.buffer.readUInt32LE(4);
-
-        if (this.buffer.length >= 8 + len) {
-          const packetData = this.buffer.subarray(8, 8 + len);
-          const payload = JSON.parse(packetData.toString());
-
-          // Trigger the callback registered by the Client
-          this.dataCallback?.(op, payload);
-
-          this.buffer = this.buffer.subarray(8 + len);
-        } else {
-          break;
-        }
-      }
-    });
-
-    this.socket?.on('close', () => {
-      this.closeCallback?.();
-    });
+  // Wrap the existing private raw send in the public Transport methods:
+  sendFrame(payload: object) {
+    this.rawSend(OpCode.FRAME, payload);
   }
 
-  /**
-   * Closes the socket connection to Discord.
-   */
-  destroy() {
-    this.socket?.destroy();
+  ping(nonce: string) {
+    this.rawSend(OpCode.PING, { nonce });
   }
 
-  /**
-   * Sends a payload to Discord over the socket connection.
-   * @param op OpCode of the payload
-   * @param payload Payload object to send
-   */
-  send(op: OpCode, payload: object) {
+  private rawSend(op: OpCode, payload: object) {
     const encoded = Buffer.from(JSON.stringify(payload));
     const header = Buffer.alloc(8);
     header.writeUInt32LE(op, 0);
@@ -169,29 +115,41 @@ export class SocketConnection {
     this.socket?.write(Buffer.concat([header, encoded]));
   }
 
-  /**
-   * This is now called exactly once by the Client constructor.
-   */
-  onData(callback: (op: OpCode, data: any) => void) {
-    this.dataCallback = callback;
+  private setupBufferHandler() {
+    this.socket?.on('data', (chunk: Buffer) => {
+      this.buffer = Buffer.concat([this.buffer, chunk]);
+      while (this.buffer.length >= 8) {
+        const op: OpCode = this.buffer.readUInt32LE(0);
+        const len = this.buffer.readUInt32LE(4);
+        if (this.buffer.length >= 8 + len) {
+          const payload = JSON.parse(this.buffer.subarray(8, 8 + len).toString());
+          this.messageCallback?.(this.normalize(op, payload));
+          this.buffer = this.buffer.subarray(8 + len);
+        } else break;
+      }
+    });
+    this.socket?.on('close', () => this.closeCallback?.());
   }
 
-  /**
-   * Sets a custom path list for the socket connection.
-   * @param pathList Array of PathData objects
-   */
-  setPathList(pathList: PathData[]) {
-    for (const path of pathList) {
-      // Add the path to the beginning of the list
-      defaultPathList.unshift(path);
-    }
+  private normalize(op: OpCode, data: any): TransportMessage {
+    if (op === OpCode.CLOSE) return { type: 'close', data };
+    if (op === OpCode.PING) return { type: 'ping', data };
+    return { type: 'frame', data };
   }
 
-  /**
-   * Registers a callback for when the socket connection is closed.
-   * @param callback Function to call when the socket is closed
-   */
+  onMessage(callback: (message: TransportMessage) => void) {
+    this.messageCallback = callback;
+  }
+
   onClose(callback: () => void) {
     this.closeCallback = callback;
+  }
+
+  destroy() {
+    this.socket?.destroy();
+  }
+
+  setPathList(pathList: PathData[]) {
+    for (const path of pathList) defaultPathList.unshift(path);
   }
 }
