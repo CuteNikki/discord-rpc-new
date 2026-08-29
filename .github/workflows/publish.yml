@@ -3,7 +3,10 @@ name: Publish to npm
 on:
   release:
     types: [published]
-  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
 
 jobs:
   publish:
@@ -23,4 +26,4 @@ jobs:
         run: bun run build
 
       - name: Publish to npm
-        run: bun publish --access public --provenance
+        run: bun publish --access public
