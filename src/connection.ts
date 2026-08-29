@@ -67,35 +67,44 @@ export class SocketConnection implements Transport {
       return this.connect(clientId, index + 1);
     }
 
-    return new Promise((resolve, reject) => {
-      for (const path of useablePath) {
-        // Clean up old socket if it exists from a previous failed attempt
-        if (this.socket) {
-          this.socket.destroy();
-          this.socket.removeAllListeners();
-        }
-
-        this.socket = connect(path);
-
-        this.socket.once('connect', () => {
-          this.socket?.removeAllListeners('error'); // Stop the retry logic once connected
-          this.setupBufferHandler();
-          resolve();
-        });
-
-        this.socket.once('error', (err: any) => {
-          this.socket?.destroy();
-
-          // Only retry if the pipe doesn't exist
-          if (err.code === 'ENOENT') {
-            resolve(this.connect(clientId, index + 1));
-          } else {
-            reject(err);
-          }
-        });
+    // Try each candidate path in sequence, not all at once — attaching
+    // listeners to multiple sockets in the same loop meant whichever one
+    // connected first would `resolve()` from a closure referencing
+    // `this.socket`, which by then may have been overwritten (and
+    // destroyed) by a later iteration of the loop.
+    for (const path of useablePath) {
+      try {
+        await this.tryConnect(path, clientId);
+        return;
+      } catch (err: any) {
+        if (err?.code !== 'ENOENT') throw err;
+        // ENOENT: this specific path doesn't have a listener, try the next one
       }
-    });
+    }
 
+    // None of the candidate paths for this index worked; advance to the next pipe index
+    return this.connect(clientId, index + 1);
+  }
+
+  private tryConnect(path: string, clientId: string): Promise<void> {
+    this.buffer = Buffer.alloc(0); // discard any partial frame from a prior connection
+    return new Promise((resolve, reject) => {
+      const socket = connect(path);
+
+      socket.once('connect', () => {
+        socket.removeAllListeners('error'); // Stop the retry logic once connected
+        this.socket = socket;
+        this.setupBufferHandler();
+        // Handshake must be sent immediately after connecting.
+        this.rawSend(OpCode.HANDSHAKE, { v: 1, client_id: clientId });
+        resolve();
+      });
+
+      socket.once('error', (err: any) => {
+        socket.destroy();
+        reject(err);
+      });
+    });
   }
 
   // Wrap the existing private raw send in the public Transport methods:
@@ -123,7 +132,8 @@ export class SocketConnection implements Transport {
         const len = this.buffer.readUInt32LE(4);
         if (this.buffer.length >= 8 + len) {
           const payload = JSON.parse(this.buffer.subarray(8, 8 + len).toString());
-          this.messageCallback?.(this.normalize(op, payload));
+          const message = this.normalize(op, payload);
+          if (message) this.messageCallback?.(message);
           this.buffer = this.buffer.subarray(8 + len);
         } else break;
       }
@@ -131,10 +141,11 @@ export class SocketConnection implements Transport {
     this.socket?.on('close', () => this.closeCallback?.());
   }
 
-  private normalize(op: OpCode, data: any): TransportMessage {
+  private normalize(op: OpCode, data: any): TransportMessage | undefined {
     if (op === OpCode.CLOSE) return { type: 'close', data };
     if (op === OpCode.PING) return { type: 'ping', data };
-    return { type: 'frame', data };
+    if (op === OpCode.FRAME) return { type: 'frame', data };
+    return undefined; // PONG/HANDSHAKE echo/etc. — nothing to emit
   }
 
   onMessage(callback: (message: TransportMessage) => void) {

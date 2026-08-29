@@ -12,12 +12,36 @@ export class WebSocketConnection implements Transport {
       throw new Error('Could not find a running Discord instance on any local WebSocket port.');
     }
 
+    try {
+      await this.tryConnect(clientId, portIndex);
+    } catch {
+      // Only a failure to establish the connection advances to the next
+      // port. Once connected, errors are handled via 'close' instead —
+      // see tryConnect.
+      return this.connect(clientId, portIndex + 1);
+    }
+  }
+
+  private tryConnect(clientId: string, portIndex: number): Promise<void> {
     return new Promise((resolve, reject) => {
       const url = `ws://127.0.0.1:${portIndex}/?v=1&client_id=${clientId}&encoding=json`;
       const socket = new WebSocket(url);
 
+      // Before we're connected, any error means "nothing listening here" —
+      // reject so the caller can try the next port.
+      socket.onerror = () => {
+        socket.close();
+        reject(new Error(`No Discord WebSocket server on port ${portIndex}`));
+      };
+
       socket.onopen = () => {
         this.socket = socket;
+
+        // Once connected, an error is a connection problem, not a "wrong
+        // port" signal — stop treating it as one. The 'close' event that
+        // follows will drive Client's reconnect logic instead.
+        socket.onerror = () => {};
+
         socket.onmessage = (event) => {
           try {
             this.messageCallback?.({ type: 'frame', data: JSON.parse(event.data as string) });
@@ -27,11 +51,6 @@ export class WebSocketConnection implements Transport {
         };
         socket.onclose = () => this.closeCallback?.();
         resolve();
-      };
-
-      socket.onerror = () => {
-        socket.close();
-        resolve(this.connect(clientId, portIndex + 1));
       };
     });
   }

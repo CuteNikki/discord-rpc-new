@@ -202,12 +202,12 @@ export class Client extends EventEmitter {
    */
   private async connectWithRetry() {
     if (this.isDestroyed) return;
+    if (!this.clientId) {
+      throw new Error('connectWithRetry() called before login() set a client ID.');
+    }
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
 
     try {
-      if (!this.clientId) {
-        throw new Error('Client ID is not set. Call login() before attempting to connect.');
-      }
       await this.connection.connect(this.clientId);
       if (this.isDestroyed) return;
       // Handshake already sent by the transport during connect().
@@ -235,7 +235,7 @@ export class Client extends EventEmitter {
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
 
     this.reconnectTimer = setTimeout(() => {
-      this.connectWithRetry();
+      this.connectWithRetry().catch((err) => this.emit('error', err));
     }, 5_000);
   }
 
