@@ -1,7 +1,7 @@
 {
   "name": "discord-rpc-new",
   "type": "module",
-  "version": "1.4.2",
+  "version": "1.4.3",
   "description": "A lightweight, typed Discord RPC client",
   "license": "MIT",
   "keywords": [
@@ -53,6 +53,7 @@
     "node": ">=12.0.0"
   },
   "devDependencies": {
+    "@types/node": "^26.4.0",
     "bun-types": "^1.4.0",
     "tsdown": "^0.22.14"
   },

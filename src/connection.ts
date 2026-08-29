@@ -1,5 +1,5 @@
 // Libraries
-import { existsSync, realpathSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { connect, type Socket } from 'node:net';
 import { join } from 'node:path';
 // Types
@@ -11,37 +11,35 @@ const WINDOWS_IPC_PIPE_PATH = `\\\\?\\pipe\\${IPC_SOCKET_NAME}`;
 const { XDG_RUNTIME_DIR, TMPDIR, TMP, TEMP } = process.env;
 const UNIX_TEMP_DIR_FALLBACK = '/tmp';
 
+// Helper to safely get the base prefix without realpathSync throwing ENOENT
+const getPrefix = () => XDG_RUNTIME_DIR ?? TMPDIR ?? TMP ?? TEMP ?? UNIX_TEMP_DIR_FALLBACK;
+
 const defaultPathList: PathData[] = [
   {
     platform: ['win32'],
     format: (id) => `${WINDOWS_IPC_PIPE_PATH}-${id}`,
   },
-  // MacOS and Linux
+  // MacOS and Linux (Standard)
   {
     platform: ['darwin', 'linux'],
-    format: (id) => {
-      const prefix = realpathSync(XDG_RUNTIME_DIR ?? TMPDIR ?? TMP ?? TEMP ?? UNIX_TEMP_DIR_FALLBACK);
-      return join(prefix, `${IPC_SOCKET_NAME}-${id}`);
-    },
+    format: (id) => join(getPrefix(), `${IPC_SOCKET_NAME}-${id}`),
   },
   // Linux (Snap)
   {
     platform: ['linux'],
-    format: (id) => {
-      const prefix = realpathSync(XDG_RUNTIME_DIR ?? TMPDIR ?? TMP ?? TEMP ?? UNIX_TEMP_DIR_FALLBACK);
-      return join(prefix, 'snap.discord', `${IPC_SOCKET_NAME}-${id}`);
-    },
-  },
-  // Linux (Flatpak)
-  {
-    platform: ['linux'],
-    format: (id) => {
-      const prefix = realpathSync(XDG_RUNTIME_DIR ?? TMPDIR ?? TMP ?? TEMP ?? UNIX_TEMP_DIR_FALLBACK);
-
-      return join(prefix, 'app', 'com.discordapp.Discord', `${IPC_SOCKET_NAME}-${id}`);
-    },
+    format: (id) => join(getPrefix(), 'snap.discord', `${IPC_SOCKET_NAME}-${id}`),
   },
 ];
+
+// Linux (Flatpak) - Covers Stable, Canary, PTB, and Vesktop
+const flatpakApps = ['com.discordapp.Discord', 'com.discordapp.DiscordCanary', 'com.discordapp.DiscordPTB', 'dev.vencord.Vesktop'];
+
+for (const app of flatpakApps) {
+  defaultPathList.push({
+    platform: ['linux'],
+    format: (id) => join(getPrefix(), 'app', app, `${IPC_SOCKET_NAME}-${id}`),
+  });
+}
 
 export class SocketConnection {
   /**

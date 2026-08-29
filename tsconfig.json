@@ -7,6 +7,7 @@
     "types": ["bun-types"],
 
     // Output settings
+    "rootDir": "./src",
     "outDir": "./dist",
     "declaration": true,
     "noEmit": false,
