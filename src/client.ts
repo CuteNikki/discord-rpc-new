@@ -51,10 +51,31 @@ export class Client extends EventEmitter {
   private lastActivity?: ActivityPayload;
 
   /**
+   * True once destroy() has been called. Guards every reconnect code path so
+   * a connection attempt that was already in flight when destroy() ran can't
+   * schedule another reconnect afterwards (see connectWithRetry/attemptReconnect).
+   */
+  private isDestroyed = false;
+
+  /**
+   * Number of consecutive failed reconnect attempts since the last successful READY.
+   */
+  private reconnectAttempts = 0;
+
+  /**
+   * Maximum number of automatic reconnect attempts before giving up and
+   * emitting 'reconnect_failed'. Defaults to Infinity to preserve the
+   * previous unbounded-retry behavior for existing consumers.
+   */
+  private maxReconnectAttempts: number;
+
+  /**
    * Initializes a new RPC Client instance.
    */
   constructor(options?: ClientOptions) {
     super();
+
+    this.maxReconnectAttempts = options?.maxReconnectAttempts ?? Infinity;
 
     // Set custom path list if provided
     if (options?.pathList) {
@@ -106,6 +127,7 @@ export class Client extends EventEmitter {
       // Emit the specific command/event type
       if (data.evt === Event.READY) {
         this.isReady = true;
+        this.reconnectAttempts = 0;
         this.emit(Event.READY, data.data);
 
         if (this.lastActivity) {
@@ -124,29 +146,57 @@ export class Client extends EventEmitter {
 
   /**
    * Logs in to Discord and establishes the IPC connection.
-   * @returns Promise that resolves when login is successful
+   * @param timeout Optional milliseconds to wait for READY before rejecting.
+   *   If omitted, login() only settles once READY fires or reconnect attempts
+   *   are exhausted (see `maxReconnectAttempts` in ClientOptions).
+   * @returns Promise that resolves when login is successful, rejects if the
+   *   connection can't be established (timeout, or max reconnect attempts reached).
    */
   async login({
     clientId,
     clientSecret,
     scopes,
     accessToken,
+    timeout,
   }: {
     clientId: string;
     clientSecret?: string;
     scopes?: string[];
     accessToken?: string;
+    timeout?: number;
   }): Promise<ReadyResponse> {
     this.clientId = clientId;
     await this.connectWithRetry();
 
-    return new Promise((resolve) => {
-      this.once(Event.READY, (data) => {
+    return new Promise((resolve, reject) => {
+      const timer = timeout
+        ? setTimeout(() => {
+            cleanup();
+            reject(new Error('Login timed out'));
+          }, timeout)
+        : undefined;
+
+      const onReady = (data: ReadyResponse) => {
+        cleanup();
         // Clear any previous heartbeat and start a new one
         if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
         this.heartbeatTimer = setInterval(() => this.ping(), 30_000);
         resolve(data);
-      });
+      };
+
+      const onReconnectFailed = () => {
+        cleanup();
+        reject(new Error('Failed to connect to Discord: max reconnect attempts reached'));
+      };
+
+      const cleanup = () => {
+        if (timer) clearTimeout(timer);
+        this.off(Event.READY, onReady);
+        this.off('reconnect_failed', onReconnectFailed);
+      };
+
+      this.once(Event.READY, onReady);
+      this.once('reconnect_failed', onReconnectFailed);
     });
   }
 
@@ -154,22 +204,35 @@ export class Client extends EventEmitter {
    * Attempts to reconnect to Discord with exponential backoff.
    */
   private async connectWithRetry() {
+    if (this.isDestroyed) return;
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
 
     try {
       await this.connection.connect();
+      // destroy() may have run while we were awaiting connect() above.
+      if (this.isDestroyed) return;
       // If we get here, we connected! Send Handshake immediately.
       this.connection.send(OpCode.HANDSHAKE, { v: 1, client_id: this.clientId });
     } catch (err) {
+      if (this.isDestroyed) return;
       console.log('Failed to connect to Discord. Retrying in 5s...');
       this.attemptReconnect();
     }
   }
 
   /**
-   * Sets a timer to attempt reconnection after a delay if the connection is lost.
+   * Sets a timer to attempt reconnection after a delay if the connection is lost,
+   * unless the client has been destroyed or maxReconnectAttempts has been reached.
    */
   private attemptReconnect() {
+    if (this.isDestroyed) return;
+
+    this.reconnectAttempts++;
+    if (this.reconnectAttempts > this.maxReconnectAttempts) {
+      this.emit('reconnect_failed');
+      return;
+    }
+
     // Prevent multiple timers
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
 
@@ -183,6 +246,11 @@ export class Client extends EventEmitter {
    * @returns Promise that resolves when the client is destroyed
    */
   async destroy() {
+    // Set first, synchronously, so any connectWithRetry() already in flight
+    // sees it as soon as its pending await resolves and bails out instead
+    // of scheduling another reconnect on a "destroyed" client.
+    this.isDestroyed = true;
+
     // Clear timers
     if (this.heartbeatTimer) {
       clearInterval(this.heartbeatTimer);
@@ -193,9 +261,11 @@ export class Client extends EventEmitter {
       this.reconnectTimer = undefined;
     }
 
-    // Clear activity before destroying
-    await this.clearActivity();
-    // Prevent auto-reconnect logic from firing
+    // Only bother clearing activity if we were ever actually ready -
+    // otherwise this is a no-op that just logs a confusing warning.
+    if (this.isReady) {
+      await this.clearActivity();
+    }
     this.isReady = false;
     // Destroy the underlying connection
     this.connection.destroy();
