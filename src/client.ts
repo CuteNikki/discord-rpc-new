@@ -1,19 +1,21 @@
-// Libraries
 import { EventEmitter } from 'node:events';
-// Internal
+
 import { SocketConnection } from './connection';
+import { WebSocketConnection } from './websocket';
+
 import { generateNonce } from './utils';
-// Types
+
 import {
   Command,
   Event,
   LobbyType,
-  OpCode,
   type ActivityPayload,
   type AuthenticateResponse,
   type AuthorizeResponse,
   type ClientOptions,
   type ReadyResponse,
+  type Transport,
+  type TransportMessage,
 } from './types';
 
 /**
@@ -21,9 +23,9 @@ import {
  */
 export class Client extends EventEmitter {
   /**
-   * Underlying Discord IPC connection
+   * Underlying Discord connection
    */
-  private connection = new SocketConnection();
+  private connection: Transport;
 
   /**
    * Indicates if the client is ready (handshake complete)
@@ -74,17 +76,20 @@ export class Client extends EventEmitter {
    */
   constructor(options?: ClientOptions) {
     super();
-
     this.maxReconnectAttempts = options?.maxReconnectAttempts ?? Infinity;
 
-    // Set custom path list if provided
+    this.connection = options?.transport === 'websocket' ? new WebSocketConnection() : new SocketConnection();
+
     if (options?.pathList) {
-      this.connection.setPathList(options.pathList);
+      if (this.connection instanceof SocketConnection) {
+        this.connection.setPathList(options.pathList);
+      } else {
+        console.warn('pathList is only supported with the ipc transport; ignoring.');
+      }
     }
 
-    // Centralized data handler
-    this.connection.onData((op: OpCode, data: any) => {
-      this.handleIncoming(op, data);
+    this.connection.onMessage((message: TransportMessage) => {
+      this.handleIncoming(message);
     });
 
     this.connection.onClose(() => {
@@ -110,38 +115,30 @@ export class Client extends EventEmitter {
    * @param data Payload data
    * @returns void
    */
-  private handleIncoming(op: OpCode, data: any) {
-    // 1. Handle Protocol-level events
-    if (op === OpCode.CLOSE) {
-      this.emit('disconnected', data);
+  private handleIncoming(message: TransportMessage) {
+    if (message.type === 'close') {
+      this.emit('disconnected', message.data);
+      return;
+    }
+    if (message.type === 'ping') {
+      this.emit('ping', message.data);
       return;
     }
 
-    if (op === OpCode.PING) {
-      this.emit('ping', data);
-      return;
-    }
-
-    // 2. Handle Frame-level events
-    if (op === OpCode.FRAME) {
-      // Emit the specific command/event type
-      if (data.evt === Event.READY) {
-        this.isReady = true;
-        this.reconnectAttempts = 0;
-        this.emit(Event.READY, data.data);
-
-        if (this.lastActivity) {
-          this.setActivity(this.lastActivity);
-        }
+    // message.type === 'frame'
+    const data = message.data;
+    if (data.evt === Event.READY) {
+      this.isReady = true;
+      this.reconnectAttempts = 0;
+      this.emit(Event.READY, data.data);
+      if (this.lastActivity) {
+        this.setActivity(this.lastActivity);
       }
-
-      if (data.evt === Event.ERROR) {
-        this.emit(Event.ERROR, new Error(data.data.message));
-      }
-
-      // Emit everything else as general 'message' or by command name
-      this.emit(data.cmd, data);
     }
+    if (data.evt === Event.ERROR) {
+      this.emit(Event.ERROR, new Error(data.data.message));
+    }
+    this.emit(data.cmd, data);
   }
 
   /**
@@ -205,14 +202,15 @@ export class Client extends EventEmitter {
    */
   private async connectWithRetry() {
     if (this.isDestroyed) return;
+    if (!this.clientId) {
+      throw new Error('connectWithRetry() called before login() set a client ID.');
+    }
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
 
     try {
-      await this.connection.connect();
-      // destroy() may have run while we were awaiting connect() above.
+      await this.connection.connect(this.clientId);
       if (this.isDestroyed) return;
-      // If we get here, we connected! Send Handshake immediately.
-      this.connection.send(OpCode.HANDSHAKE, { v: 1, client_id: this.clientId });
+      // Handshake already sent by the transport during connect().
     } catch (err) {
       if (this.isDestroyed) return;
       console.log('Failed to connect to Discord. Retrying in 5s...');
@@ -237,7 +235,7 @@ export class Client extends EventEmitter {
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
 
     this.reconnectTimer = setTimeout(() => {
-      this.connectWithRetry();
+      this.connectWithRetry().catch((err) => this.emit('error', err));
     }, 5_000);
   }
 
@@ -275,7 +273,7 @@ export class Client extends EventEmitter {
    * Sends a ping to Discord to keep the connection alive.
    */
   ping() {
-    this.connection.send(OpCode.PING, { nonce: generateNonce() });
+    this.connection.ping(generateNonce());
   }
 
   /**
@@ -287,14 +285,10 @@ export class Client extends EventEmitter {
    */
   async request(cmd: Command, args?: object, evt?: Event): Promise<any> {
     const nonce = generateNonce();
-
     return new Promise((resolve, reject) => {
-      // Create a specific handler for this command + nonce
       const handler = (data: any) => {
         if (data.nonce === nonce) {
-          // Clean up: stop listening for this command once we find our nonce
           this.removeListener(cmd, handler);
-
           if (data.evt === 'ERROR') {
             reject(new Error(data.data.message));
           } else {
@@ -302,12 +296,8 @@ export class Client extends EventEmitter {
           }
         }
       };
-
-      // Listen for the command event emitted by handleIncoming
       this.on(cmd, handler);
-
-      // Send the frame to Discord
-      this.connection.send(OpCode.FRAME, { cmd, args, evt, nonce });
+      this.connection.sendFrame({ cmd, args, evt, nonce });
     });
   }
 
