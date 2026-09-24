@@ -29,6 +29,8 @@ export type ClientOptions = {
    * and emits 'reconnect_failed'. Defaults to Infinity (previous behavior).
    */
   maxReconnectAttempts?: number;
+  /** Which transport to use to reach Discord. Defaults to 'ipc'. */
+  transport?: 'ipc' | 'websocket';
 };
 
 /**

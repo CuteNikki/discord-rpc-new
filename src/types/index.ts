@@ -4,3 +4,4 @@ export * from './commands';
 export * from './errors';
 export * from './events';
 export * from './opcodes';
+export * from './transport';
